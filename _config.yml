@@ -20,8 +20,6 @@ url: https://liamdalg.github.io
 menu:
   - title: 'Home'
     url: '/'
-  - title: 'Projects'
-    url: '/projects'
   - title: 'Tags'
     url: '/tags'
   - title: 'Categories'
