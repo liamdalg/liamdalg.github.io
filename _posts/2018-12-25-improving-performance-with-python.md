@@ -47,7 +47,7 @@ This is the function which performs a kernel convolution on a 2-dimensional Nump
 
 Let's see how I sped this up using Cython! Credit to [this](https://cython.readthedocs.io/en/latest/src/userguide/numpy_tutorial.html#numpy-tutorial) tutorial.
 
-The first thing to do is to create a copy of the code and make it into a `.pyx` file. I'll be using `cython` to compile into `.c` files, and then `gcc` to compile that into an `.so`.
+The first thing to do is to create a copy of the code and make it into a `.pyx` file. I'll be using `cython` to compile into `.c` files, and then `gcc` to compile that into an `.so`. The `.so` file can be imported into Python as if it is a regular module.
 
 {% highlight bash %}
 cython <file>.pyx -3 -a 
