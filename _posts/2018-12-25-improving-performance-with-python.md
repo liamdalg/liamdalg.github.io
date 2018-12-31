@@ -20,6 +20,8 @@ But what is Cython? See [cython.org](https://cython.org/) for the full explanati
 
 > The speed tests in this post are performed using a 128x128 array and 3x3 kernel
 
+<!--more-->
+
 # The Culprit
 
 {% highlight python %}
@@ -36,6 +38,9 @@ def _kernel_convolution_2d(arr: np.ndarray, kernel: np.ndarray) -> np.ndarray:
             conv[i][j] = np.sum(np.multiply(padded_arr[i:(i + rows), j:(j + cols)], flipped_kernel))
 
     return conv
+
+%timeit conv_old._kernel_convolution_2d(x, k)
+156 ms ± 2.31 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 {% endhighlight %}
 
 <figure class="center">
@@ -43,9 +48,30 @@ def _kernel_convolution_2d(arr: np.ndarray, kernel: np.ndarray) -> np.ndarray:
 	<figcaption><a href="http://deeplearning.stanford.edu/wiki/index.php/Feature_extraction_using_convolution" title="Example 2D Convolution">Example 2D convolution</a>.</figcaption>
 </figure>
 
-This is the function which performs a kernel convolution on a 2-dimensional Numpy array. The gif above demonstrates what it is doing: it 'slides' the kernel over the image centred around each pixel, multiplies each pixel element-wise with the kernel, and then takes the sum as the new pixel value. It does this by taking a slice of the array which is the same size as the kernel, multiplying them together with `np.multiply`, and then taking the sum with `np.sum`. Another quirk is that it pads the array with 0s to prevent the convolved array from being smaller than the source array, as displayed in the gif above.
+This function performs a kernel convolution on a 2-dimensional Numpy array, and the gif above demonstrates what this achieves. The yellow squares make up the **kernel**, which is a 2-dimensional array. The centre of the kernel is placed over a particular element in the target array (green), and the new value of that pixel is calculated by multiplying the overlapping elements between the kernel and target together, then adding the results. This is repeated for every element in the target array to produce a new array. In this example only complete convolutions are accepted, i.e. the kernel cannot be centred on the edge of the target since it will overlap outside the bounds of the array.
 
-Let's see how I sped this up using Cython! Credit to [this](https://cython.readthedocs.io/en/latest/src/userguide/numpy_tutorial.html#numpy-tutorial) tutorial.
+For example, if we look at the example top left element with kernel $$k$$ and target $$t$$:
+
+$$
+k = \left[
+\begin{matrix}
+    1 & 0 & 1 \\
+    0 & 1 & 0 \\
+    1 & 0 & 1
+\end{matrix}
+\right]
+t = \left[
+\begin{matrix}
+    1 & 1 & 1 \\
+    0 & 1 & 1 \\
+    0 & 0 & 1
+\end{matrix}
+\right] \\~\\
+r * t = (1 \cdot 1) + (0 \cdot 1) + (1 \cdot 1) + (0 \cdot 0) + (1 \cdot 1) +  (0 \cdot 1) +  (1 \cdot 0) +  (0 \cdot 0) +  (1 \cdot 1) \\
+r * t = 1 + 1 + 1 + 1 = 4
+$$
+
+As you can imagine, convolutions can scale very fast - an $$n$$x$$n$$ kernel requires $$n^2$$ computations for each element in the target array. I encountered terrible performance (possibly due to my bad code), so I turned to Cython! Let's see how I did it! Credit to [this](https://cython.readthedocs.io/en/latest/src/userguide/numpy_tutorial.html#numpy-tutorial) tutorial.
 
 The first thing to do is to create a copy of the code and make it into a `.pyx` file. I'll be using `cython` to compile into `.c` files, and then `gcc` to compile that into an `.so`. The `.so` file can be imported into Python as if it is a regular module.
 
@@ -56,7 +82,7 @@ gcc -shared -pthread -fPIC $(python3.5-config --cflags) -fno-strict-aliasing -o 
 
 The `-3` flag makes sure to compile Python 3 rather than Python 2, and `-a` generates an `.html` file which can be used to check how the Python and C interact with each other. `gcc` requires `$(python3.5-config --cflags)` (replace 3.5 with your own version of Python) so that it knows where to find the bindings and flags relevant for Python.
 
-<!--more-->
+You can also compile using a `setup.py` file but I just opted for this approach since it was way easier.
 
 ## Basic Types
 
@@ -113,8 +139,6 @@ cdef Py_ssize_t j_max = arr.shape[1]
 for i in range(i_max):
     for j in range(j_max):
 
-%timeit conv_old._kernel_convolution_2d(x, k)
-156 ms ± 2.31 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
 %timeit conv_cy._kernel_convolution_2d(x, k)
 86.9 ms ± 1.25 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 {% endhighlight %}
@@ -146,8 +170,6 @@ def _kernel_convolution_2d(double[:, :] arr, double[:, :] kernel) -> np.ndarray:
 
     return np.asarray(conv)
 
-%timeit -n10 conv_old._kernel_convolution_2d(x, k)
-151 ms ± 2.96 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 %timeit -n10 conv_cy._kernel_convolution_2d(x, k)
 233 ms ± 1.39 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 {% endhighlight %}
@@ -182,19 +204,15 @@ def _kernel_convolution_2d(double[:, :] arr, double[:, :] kernel) -> np.ndarray:
 
     return np.asarray(conv)
 
-%timeit -n10 conv_old._kernel_convolution_2d(x, k)
-195 ms ± 1.49 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 %timeit -n10 conv_cy._kernel_convolution_2d(x, k)
 3.52 ms ± 1.05 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 {% endhighlight %}
 
-That's a pretty substantial increase in performance! Approximately 56x in fact for a 128x128 array and 3x3 kernel. All of that just from enforcing types on the variables and implementing the convolution logic explicitly. Obviously, a downside of this is that it has lost the dynamic typing that Python provides, so this won't work for types which aren't `double` or `np.double`. Fortunately I wanted to use this for images so `double` is more than enough. 
+That's a pretty substantial increase in performance! Initially, I was quite happy with the results and left it there, but there's still that `np.pad` floating around. Padding the array is very inefficient since it needs to create it using Numpy, and then cast it to a `MemoryView`.
 
 ## Extra
 
-The last extra thing I wanted to implement was removing the array padding. We can get rid of the array padding by checking whether the current index is within the bounds of the array, and if not we skip the computation. 
-
-Here's the final code (for now)!
+We can get rid of the array padding by checking whether the current index is within the bounds of the array, and if not we skip the computation. This is the same as padding with 0s since multiplying by 0 is useless and can be ignored.
 
 {% highlight python %}
 def _kernel_convolution_2d(double[:, :] arr, double[:, :] kernel) -> np.ndarray:
@@ -227,6 +245,26 @@ def _kernel_convolution_2d(double[:, :] arr, double[:, :] kernel) -> np.ndarray:
 578 µs ± 2.02 µs per loop (mean ± std. dev. of 7 runs, 1000 loops each)
 {% endhighlight %}
 
-Overall, I'm pretty happy with how this turned out. I managed to reduce the time taken for a 128x128 image down from 150ms to 570µs! Not all programs will benefit from enforcing C types however: here it only mattered so much since there was a lot of raw number processing going on. I could've gone further and implemented a faster version of `np.empty`, `np.flipud` and `np.fliplr`, but I think that they won't impact the performance nearly as strongly as the computation did. 
+There's another secret final step which was made possible by this change. Removing padding required the bounds to be checked first. Cython actually already checks the bounds for you so that it can throw descriptive errors, but since it's (probably) not possible to access the array out of bounds, it can be turned off. 
 
-Of course, it's entirely possible that my implementation in Python was just terrible, but this is was a good learning opportunity nonetheless. 
+{% highlight python %}
+cimport cython
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def _kernel_convolution_2d(double[:, :] arr, double[:, :] kernel) -> np.ndarray:
+    # ...
+{% endhighlight %}
+
+And now, altogether, here is the final speed!
+
+{% highlight python %}
+%timeit imgproc_cy._kernel_convolution_2d(x, k)
+296 µs ± 4.82 µs per loop (mean ± std. dev. of 7 runs, 1000 loops each)
+{% endhighlight %}
+
+Overall the speed has improved from 156ms to 296µs for a 128x128 target array and 3x3 kernel, which is approximately 527x faster! Of course the speed gains aren't exact and differ depending on the image/kernel size, but the point is that its MUCH faster. I think there's still minor gains to be made by recreating `np.fliplr`, `np.flipud`, and `np.empty`, but they're probably not as effective as these changes.
+
+Of course, what it gained in speed it lost in flexibility - now the convolution only works with `double` rather than any numpy array. However, I will be updating the code later (see my Github sometime in the future!) to use Cython's fused types, which are a way to implement a sort of 'templating' into the code.
+
+I'm not sure whether the slow speed was just Python and its dynamic typing, my code, or a combination of the two, but this was a fun little project.
