@@ -36,7 +36,7 @@ owner:
   bio:            "Second Year Computer Science Student. Interested in programming, maths, and physics."
   email:          liamdalg99@email.com
   # Twitter nick for use in Twitter cards and follow button.
-  twitter: Dalgrayno # if no twitter in this config, the twitter follow button will be removed
+  twitter: # if no twitter in this config, the twitter follow button will be removed
   # GitHub nick for use in follow button in author block.
   github: liamdalg
 
